@@ -282,7 +282,8 @@ function Uref(){
 // ---------- geometry
 const toPx=(x,y)=>[(x+XR)/(2*XR)*W,(YR-y)/(2*YR)*H];
 const toW=(px,py)=>[px/W*2*XR-XR, YR-py/H*2*YR];
-const snap=v=>Math.round(v*20)/20;
+let SNAP = 0.05;                 // sandbox: fine. Challenge mode coarsens this so that
+const snap=v=>Math.round(v/SNAP)*SNAP;  // a mirrored tap lands exactly on its partner.
 function resize(){
   dpr=window.devicePixelRatio||1;
   W=stage.clientWidth; XR = W<560 ? 2.5 : 4; H=Math.round(Math.min(W<560?W*0.75:W*0.47, 400, (window.self!==window.top ? 400 : Math.max(280, window.innerHeight*0.55))));
@@ -364,6 +365,14 @@ function draw(){
   for (const e of S.els){ const [px,py]=toPx(e.x,e.y); const ci=Math.round(px/st), cj=Math.round(py/st);
     for (let dj=-3;dj<=2;dj++) for (let di=-3;di<=2;di++){ const i=ci+di,j=cj+dj; if(i>=0&&j>=0&&i<nx&&j<ny) mask[j*nx+i]=1; } }
   cb.clearRect(0,0,W,H); cb.fillStyle=css('--bg'); cb.fillRect(0,0,W,H);
+  if (CHAL && CHAL.lattice){                 // show where things can go, so symmetry is visible
+    cb.fillStyle=css('--muted'); cb.globalAlpha=.45;
+    const mi=Math.floor(XR/SNAP), mj=Math.floor(YR/SNAP);
+    for (let i=-mi;i<=mi;i++) for (let j=-mj;j<=mj;j++){
+      const [px,py]=toPx(i*SNAP, j*SNAP);
+      cb.fillRect(Math.round(px)-1.25, Math.round(py)-1.25, 2.5, 2.5); }
+    cb.globalAlpha=1;
+  }
   // Cp shading
   if (S.L.cp && S.U>0.02){
     if (!off) off=document.createElement('canvas');
@@ -423,9 +432,9 @@ function draw(){
 // Test the physics directly rather than pattern-matching the arrangement, so any
 // construction that genuinely works is accepted.
 const CH = {
-  wall:   {kind:'walls', gv:false, guides:true },
-  corner: {kind:'walls', gv:true,  guides:true },
-  body:   {kind:'body',  gv:false, guides:false}
+  wall:   {kind:'walls', gv:false, guides:true,  snap:0.4, lattice:true },
+  corner: {kind:'walls', gv:true,  guides:true,  snap:0.4, lattice:true },
+  body:   {kind:'body',  gv:false, guides:false, snap:0.2, lattice:false}
 };
 const SEQ = ['wall','corner','body'];
 let CHAL = null, CHKEY = null, STAGE = -1, CHAINED = false;
@@ -687,6 +696,7 @@ function startStage(k){
   chalBest = 0; chalPrevN = 0; chalNudged = false; chalT0 = Date.now();
   // black means 'the line that matters': a wall in stages 1-2, the dividing
   // streamline in stage 3.
+  SNAP = CHAL.snap;
   S.L.div = (CHAL.kind === 'body');
   $('guides').hidden = !CHAL.guides;
   $('gv').style.display = CHAL.gv ? '' : 'none';
