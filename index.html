@@ -59,6 +59,22 @@ input[type=range]{width:100%;height:24px;accent-color:var(--hi)}
 .msg{margin-top:4px}
 details{margin-top:8px}
 summary{cursor:pointer;color:var(--muted)}
+/* ---- challenge mode ---- */
+.task{margin:0 0 10px;padding:12px 14px;border-radius:10px;background:var(--panel);border:1px solid var(--border)}
+.task b{display:block;font-size:1.12rem;line-height:1.3}
+.task span{display:block;color:var(--muted);font-size:13px;margin-top:3px}
+.task.done{border-color:var(--div);background:color-mix(in srgb,var(--div) 8%,var(--panel))}
+.guides{position:absolute;inset:0;pointer-events:none;z-index:5}
+.guides i{position:absolute;transition:border-color .18s, border-width .18s}
+.guides .gh{left:0;right:0;top:50%;border-top:2.5px dashed #8a8a8a}
+.guides .gv{top:0;bottom:0;left:50%;border-left:2.5px dashed #8a8a8a}
+.guides .gh.solid{border-top:5px solid var(--div)}
+.guides .gv.solid{border-left:5px solid var(--div)}
+.cbar{display:flex;gap:8px;align-items:center;margin-top:8px}
+.cbar .grow{flex:1}
+body.challenge .bar > select, body.challenge .bar > .sp,
+body.challenge .hdr, body.challenge details, body.challenge .ftr,
+body.challenge .legend, body.challenge .grid2, body.challenge .hint { display:none }
 .hdr{margin:2px 0 10px}
 .hdr h1{font-size:1.35rem;line-height:1.25;margin:0 0 4px}
 .hdr p{margin:0;color:var(--muted);max-width:62ch}
@@ -85,6 +101,7 @@ summary{cursor:pointer;color:var(--muted)}
     <h1>Build your own potential flow</h1>
     <p>Drop sources, sinks, vortices and dipoles into a uniform stream and watch the flow rearrange itself. Everything is solved live from the complex potential \(w(z)\) — nothing here is precomputed.</p>
   </header>
+  <div class="task" id="task" hidden aria-live="polite"><b id="taskmain"></b><span id="tasksub"></span></div>
   <div class="bar" role="toolbar" aria-label="Flow elements">
         <select id="preset" aria-label="Example">
       <option value="uniform">Uniform flow</option>
@@ -96,6 +113,8 @@ summary{cursor:pointer;color:var(--muted)}
       <option value="spin">Circle with circulation</option>
       <option value="bath">Plughole: sink + vortex</option>
       <option value="pair">Vortex pair</option>
+      <option value="wall">Challenge: one wall</option>
+      <option value="corner">Challenge: a corner</option>
     </select>
     <span class="sp"></span>
     <span class="muted">Add</span>
@@ -108,9 +127,10 @@ summary{cursor:pointer;color:var(--muted)}
 
   <div class="stage" id="stage">
     <canvas id="bg" aria-hidden="true"></canvas>
-    <canvas id="fx" tabindex="0" role="img" aria-label="Flow plot"></canvas><div class="lay" id="lay"></div>
+    <canvas id="fx" tabindex="0" role="img" aria-label="Flow plot"></canvas><div class="lay" id="lay"></div><div class="guides" id="guides" hidden><i class="gh" id="gh"></i><i class="gv" id="gv"></i></div>
   </div>
   <p class="hint" id="hint">Drag to move; Add, then click to place.</p>
+  <div class="cbar" id="cbar" hidden><span class="grow"></span><button id="reset">Start again</button></div>
 
   <div class="legend" role="group" aria-label="Layers to show">
     <label class="chk"><input type="checkbox" id="Lpsi" checked><span style="color:var(--stream)">■</span>Streamlines \(\psi\)</label>
@@ -181,7 +201,9 @@ const PRE = {
   circle:{U:1, els:[['dip',0,0,32]]},
   spin:{U:1, els:[['dip',0,0,32],['vor',0,0,-32]]},
   bath:{U:0, els:[['src',0,0,-24],['vor',0,0,48]]},
-  pair:{U:0, els:[['vor',0,0.6,32],['vor',0,-0.6,-32]]}
+  pair:{U:0, els:[['vor',0,0.6,32],['vor',0,-0.6,-32]]},
+  wall:{U:0, els:[['src',0,0.8,24]]},
+  corner:{U:0, els:[['src',0.8,0.8,24]]}
 };
 function loadPreset(k){
   const p = PRE[k]; S.U = p.U; S.al = 0;
@@ -387,6 +409,63 @@ function draw(){
     cb.save(); cb.translate(bx+10+L/2+4, by+32); cb.rotate(-S.al); cb.strokeStyle=css('--fg'); cb.fillStyle=css('--fg'); cb.lineWidth=2.5;
     cb.beginPath(); cb.moveTo(-L/2,0); cb.lineTo(L/2-7,0); cb.stroke(); cb.beginPath(); cb.moveTo(L/2+1,0); cb.lineTo(L/2-8,-5.5); cb.lineTo(L/2-8,5.5); cb.closePath(); cb.fill(); cb.restore(); }
   readout();
+  updateChallenge();
+}
+
+// ---------- challenge mode
+// A line is a wall when the velocity normal to it vanishes along its whole length.
+// Test the physics directly rather than pattern-matching the arrangement, so any
+// construction that genuinely works is accepted.
+const CH = {wall:{gv:false}, corner:{gv:true}};
+let CHAL = null, chalBest = 0, chalT0 = 0, chalNudged = false;
+
+function isWall(axis){                       // 'h' = the line y=0, 'v' = the line x=0
+  const N = 41, R = axis==='h' ? XR : YR;
+  let worst = 0, scale = 0, used = 0;
+  for (let i=0;i<N;i++){
+    const t = -R + 2*R*i/(N-1);
+    const x = axis==='h' ? t : 0, y = axis==='h' ? 0 : t;
+    if (S.els.some(e => Math.hypot(x-e.x, y-e.y) < 0.18)) continue;   // skip singular points
+    const [u,v] = vel(x,y);
+    if (!isFinite(u+v)) continue;
+    worst = Math.max(worst, Math.abs(axis==='h' ? v : u));
+    scale = Math.max(scale, Math.hypot(u,v));
+    used++;
+  }
+  // nothing may sit on the line itself: a source in the wall is a different puzzle
+  const clear = S.els.every(e => Math.abs(axis==='h' ? e.y : e.x) > 0.2);
+  return clear && used > N*0.6 && scale > 1e-6 && worst/scale < 0.02;
+}
+
+function updateChallenge(){
+  if (!CHAL) return;
+  const h = isWall('h'), v = CHAL.gv ? isWall('v') : true;
+  $('gh').classList.toggle('solid', h);
+  if (CHAL.gv) $('gv').classList.toggle('solid', v);
+  const n = (h?1:0) + (CHAL.gv ? (v?1:0) : 0), want = CHAL.gv ? 2 : 1;
+  const onLine = S.els.some(e => Math.abs(e.y) <= 0.2 || (CHAL.gv && Math.abs(e.x) <= 0.2));
+  let main, sub = '';
+  if (n === want){
+    main = want === 2 ? 'Both walls built.' : 'Wall built.';
+    sub  = 'Nothing crosses the line. Drag things around and watch it break.';
+  } else if (onLine){
+    main = 'Make ' + (want===2?'both dashed lines':'the dashed line') + ' into solid walls.';
+    sub  = 'Keep everything off the lines \u2014 the fluid has to be on both sides.';
+  } else if (n < chalBest){
+    main = 'You had one!';
+    sub  = 'Don\u2019t undo \u2014 add.';
+  } else if (n > 0){
+    main = 'One wall built. Now the other.';
+  } else {
+    main = 'Make ' + (want===2?'both dashed lines':'the dashed line') + ' into solid walls.';
+    sub  = 'Tap Source, then tap the plot to place one.';
+    if (chalNudged) sub = 'Think about symmetry.';
+  }
+  chalBest = Math.max(chalBest, n);
+  $('taskmain').textContent = main;
+  $('tasksub').textContent = sub;
+  $('tasksub').style.display = sub ? '' : 'none';
+  $('task').classList.toggle('done', n === want);
 }
 
 // ---------- text readouts
@@ -553,6 +632,15 @@ new ResizeObserver(postHeight).observe(document.body);
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change',draw);
 window.addEventListener('resize',resize);
 const q=new URLSearchParams(location.search).get('preset'); if (q && PRE[q]) $('preset').value=q;
+if (CH[q]){
+  CHAL = CH[q]; document.body.classList.add('challenge');
+  S.L.div = false;   // black is reserved for 'this line is now a wall'
+  $('task').hidden = false; $('guides').hidden = false; $('cbar').hidden = false;
+  if (!CHAL.gv) $('gv').style.display = 'none';
+  $('reset').onclick = () => { chalBest = 0; chalNudged = false; chalT0 = Date.now(); loadPreset(q); };
+  chalT0 = Date.now();
+  setInterval(() => { if (!chalNudged && Date.now()-chalT0 > 35000){ chalNudged = true; draw(); } }, 1000);
+}
 loadPreset($('preset').value); resetParticles(); resize(); tick();
 // KaTeX is deferred: render the static maths and build the canvas label once it is ready
 addEventListener('load',()=>{ if (window.renderMathInElement) renderMathInElement(document.body, katexOpts);
