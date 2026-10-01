@@ -11,8 +11,8 @@
 /* Colour-blind-safe palette (Okabe–Ito / Paul Tol). Every pair used together stays distinguishable
    (CIEDE2000 > 20) under simulated protanopia, deuteranopia and tritanopia, and each singularity
    also has its own glyph, so colour is never the only cue. */
-:root{--bg:#fbfbf9;--fg:#1d1d1f;--muted:#5f5f66;--panel:#f0f0ec;--border:#d6d6d0;--stream:#0072B2;--equi:#D55E00;--div:#111;--src:#117733;--snk:#E69F00;--vor:#6A3D9A;--dip:#56B4E9;--hi:#0072B2;--hp:230,159,0;--lp:86,180,233;--part:30,30,35;--ubg:rgba(255,255,255,.85)}
-@media (prefers-color-scheme:dark){:root{--bg:#16181b;--fg:#e8e8ea;--muted:#a0a0a8;--panel:#202328;--border:#363a40;--stream:#56B4E9;--equi:#F07E4A;--div:#f4f4f4;--hi:#56B4E9;--hp:230,159,0;--lp:86,180,233;--part:235,235,240;--ubg:rgba(22,24,27,.85)}}
+:root{--bg:#fbfbf9;--fg:#1d1d1f;--muted:#5f5f66;--panel:#f0f0ec;--border:#d6d6d0;--stream:#0072B2;--equi:#D55E00;--div:#111;--src:#117733;--snk:#E69F00;--vor:#6A3D9A;--dip:#56B4E9;--hi:#0072B2;--hp:230,159,0;--lp:86,180,233;--part:30,30,35;--ubg:rgba(255,255,255,.85);--guide:#8a8a8a}
+@media (prefers-color-scheme:dark){:root{--bg:#16181b;--fg:#e8e8ea;--muted:#a0a0a8;--panel:#202328;--border:#363a40;--stream:#56B4E9;--equi:#F07E4A;--div:#f4f4f4;--hi:#56B4E9;--hp:230,159,0;--lp:86,180,233;--part:235,235,240;--ubg:rgba(22,24,27,.85);--guide:#8a8a8a}}
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 .wrap{padding:8px;max-width:1000px;margin:0 auto}
@@ -65,12 +65,6 @@ summary{cursor:pointer;color:var(--muted)}
 .task b{display:block;font-size:1.12rem;line-height:1.3;min-height:2.6em}
 .task span{display:block;color:var(--muted);font-size:13px;line-height:1.25;margin-top:3px;min-height:2.5em}
 .task.done{border-color:var(--div);background:color-mix(in srgb,var(--div) 8%,var(--panel))}
-.guides{position:absolute;inset:0;pointer-events:none;z-index:5}
-.guides i{position:absolute;transition:border-color .18s, border-width .18s}
-.guides .gh{left:0;right:0;top:50%;border-top:2.5px dashed #8a8a8a}
-.guides .gv{top:0;bottom:0;left:50%;border-left:2.5px dashed #8a8a8a}
-.guides .gh.solid{border-top:5px solid var(--div)}
-.guides .gv.solid{border-left:5px solid var(--div)}
 .cbar{display:flex;gap:8px;align-items:center;margin-top:8px}
 .cbar .grow{flex:1;color:var(--muted);font-size:13px}
 .cbar .next{visibility:hidden}
@@ -132,7 +126,7 @@ body.challenge #clear { display:none }
 
   <div class="stage" id="stage">
     <canvas id="bg" aria-hidden="true"></canvas>
-    <canvas id="fx" tabindex="0" role="img" aria-label="Flow plot"></canvas><div class="lay" id="lay"></div><div class="guides" id="guides" hidden><i class="gh" id="gh"></i><i class="gv" id="gv"></i></div>
+    <canvas id="fx" tabindex="0" role="img" aria-label="Flow plot"></canvas><div class="lay" id="lay"></div>
   </div>
   <p class="hint" id="hint">Drag to move; Add, then click to place.</p>
   <div class="cbar" id="cbar" hidden><span class="grow" id="stagelbl"></span><button id="next" class="next">Next</button><button id="reset">Start again</button></div>
@@ -366,11 +360,11 @@ function draw(){
     for (let dj=-3;dj<=2;dj++) for (let di=-3;di<=2;di++){ const i=ci+di,j=cj+dj; if(i>=0&&j>=0&&i<nx&&j<ny) mask[j*nx+i]=1; } }
   cb.clearRect(0,0,W,H); cb.fillStyle=css('--bg'); cb.fillRect(0,0,W,H);
   if (CHAL && CHAL.lattice){                 // show where things can go, so symmetry is visible
-    cb.fillStyle=css('--muted'); cb.globalAlpha=.45;
+    cb.fillStyle=css('--muted'); cb.globalAlpha=.6;
     const mi=Math.floor(XR/SNAP), mj=Math.floor(YR/SNAP);
     for (let i=-mi;i<=mi;i++) for (let j=-mj;j<=mj;j++){
       const [px,py]=toPx(i*SNAP, j*SNAP);
-      cb.fillRect(Math.round(px)-1.25, Math.round(py)-1.25, 2.5, 2.5); }
+      cb.fillRect(Math.round(px)-1.5, Math.round(py)-1.5, 3, 3); }
     cb.globalAlpha=1;
   }
   // Cp shading
@@ -402,6 +396,22 @@ function draw(){
     cb.strokeStyle=css('--div'); cb.lineWidth=2.2; cb.stroke(contour(PS,nx,ny,st,mask,0.5*qmin,0,1,lv,1));
     for (const [x,y] of stagPts){ const [px,py]=toPx(x,y); cb.beginPath(); cb.arc(px,py,4.5,0,TAU); cb.fillStyle=css('--div'); cb.fill(); cb.lineWidth=1.5; cb.strokeStyle=css('--bg'); cb.stroke(); }
   }
+  // challenge guides: drawn here rather than as DOM overlays, so they render
+  // identically everywhere and sit above the streamlines but below the markers.
+  if (CHAL && CHAL.guides){
+    wallH = isWall('h');
+    wallV = CHAL.gv ? isWall('v') : true;
+    const line=(x1,y1,x2,y2,solid)=>{
+      const [ax,ay]=toPx(x1,y1), [bx,by]=toPx(x2,y2);
+      cb.save(); cb.lineCap='butt';
+      cb.strokeStyle = solid ? css('--div') : css('--guide');
+      cb.lineWidth   = solid ? 5 : 2.5;
+      cb.setLineDash(solid ? [] : [9,7]);
+      cb.beginPath(); cb.moveTo(ax,ay); cb.lineTo(bx,by); cb.stroke(); cb.restore();
+    };
+    line(-XR,0, XR,0, wallH);
+    if (CHAL.gv) line(0,-YR, 0,YR, wallV);
+  }
   // singularities
   S.els.forEach((e,idx)=>{
     const [px,py]=toPx(e.x,e.y); const s=e.n;
@@ -432,12 +442,13 @@ function draw(){
 // Test the physics directly rather than pattern-matching the arrangement, so any
 // construction that genuinely works is accepted.
 const CH = {
-  wall:   {kind:'walls', gv:false, guides:true,  snap:0.4, lattice:true },
-  corner: {kind:'walls', gv:true,  guides:true,  snap:0.4, lattice:true },
-  body:   {kind:'body',  gv:false, guides:false, snap:0.2, lattice:false}
+  wall:   {kind:'walls', gv:false, guides:true,  snap:0.8, lattice:true },
+  corner: {kind:'walls', gv:true,  guides:true,  snap:0.8, lattice:true },
+  body:   {kind:'body',  gv:false, guides:false, snap:0.4, lattice:false}
 };
 const SEQ = ['wall','corner','body'];
 let CHAL = null, CHKEY = null, STAGE = -1, CHAINED = false;
+let wallH = false, wallV = false;
 let chalBest = 0, chalPrevN = 0, chalT0 = 0, chalNudged = false;
 
 function isWall(axis){                       // 'h' = the line y=0, 'v' = the line x=0
@@ -469,9 +480,7 @@ function isBody(){
 function updateChallenge(){
   if (!CHAL) return;
   if (CHAL.kind === 'body'){ updateBody(); return; }
-  const h = isWall('h'), v = CHAL.gv ? isWall('v') : true;
-  $('gh').classList.toggle('solid', h);
-  if (CHAL.gv) $('gv').classList.toggle('solid', v);
+  const h = wallH, v = wallV;
   const n = (h?1:0) + (CHAL.gv ? (v?1:0) : 0), want = CHAL.gv ? 2 : 1;
   const onLine = S.els.some(e => Math.abs(e.y) <= 0.2 || (CHAL.gv && Math.abs(e.x) <= 0.2));
   let main, sub = '';
@@ -698,9 +707,7 @@ function startStage(k){
   // streamline in stage 3.
   SNAP = CHAL.snap;
   S.L.div = (CHAL.kind === 'body');
-  $('guides').hidden = !CHAL.guides;
-  $('gv').style.display = CHAL.gv ? '' : 'none';
-  $('gh').classList.remove('solid'); $('gv').classList.remove('solid');
+  wallH = false; wallV = false;
   $('next').classList.remove('on');
   $('stagelbl').textContent = CHAINED ? 'Stage ' + (STAGE+1) + ' of ' + SEQ.length : '';
   loadPreset(k);
