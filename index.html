@@ -61,8 +61,8 @@ details{margin-top:8px}
 summary{cursor:pointer;color:var(--muted)}
 /* ---- challenge mode ---- */
 .task{margin:0 0 10px;padding:12px 14px;border-radius:10px;background:var(--panel);border:1px solid var(--border)}
-.task b{display:block;font-size:1.12rem;line-height:1.3}
-.task span{display:block;color:var(--muted);font-size:13px;margin-top:3px}
+.task b{display:block;font-size:1.12rem;line-height:1.3;min-height:2.6em}
+.task span{display:block;color:var(--muted);font-size:13px;line-height:1.25;margin-top:3px;min-height:2.5em}
 .task.done{border-color:var(--div);background:color-mix(in srgb,var(--div) 8%,var(--panel))}
 .guides{position:absolute;inset:0;pointer-events:none;z-index:5}
 .guides i{position:absolute;transition:border-color .18s, border-width .18s}
@@ -74,7 +74,8 @@ summary{cursor:pointer;color:var(--muted)}
 .cbar .grow{flex:1}
 body.challenge .bar > select, body.challenge .bar > .sp,
 body.challenge .hdr, body.challenge details, body.challenge .ftr,
-body.challenge .legend, body.challenge .grid2, body.challenge .hint { display:none }
+body.challenge .legend, body.challenge .grid2, body.challenge .hint,
+body.challenge #clear { display:none }
 .hdr{margin:2px 0 10px}
 .hdr h1{font-size:1.35rem;line-height:1.25;margin:0 0 4px}
 .hdr p{margin:0;color:var(--muted);max-width:62ch}
@@ -202,8 +203,8 @@ const PRE = {
   spin:{U:1, els:[['dip',0,0,32],['vor',0,0,-32]]},
   bath:{U:0, els:[['src',0,0,-24],['vor',0,0,48]]},
   pair:{U:0, els:[['vor',0,0.6,32],['vor',0,-0.6,-32]]},
-  wall:{U:0, els:[['src',0,0.8,24]]},
-  corner:{U:0, els:[['src',0.8,0.8,24]]}
+  wall:{U:0, els:[['src',0,0.8,16]]},
+  corner:{U:0, els:[['src',0.8,0.8,16]]}
 };
 function loadPreset(k){
   const p = PRE[k]; S.U = p.U; S.al = 0;
@@ -417,7 +418,7 @@ function draw(){
 // Test the physics directly rather than pattern-matching the arrangement, so any
 // construction that genuinely works is accepted.
 const CH = {wall:{gv:false}, corner:{gv:true}};
-let CHAL = null, chalBest = 0, chalT0 = 0, chalNudged = false;
+let CHAL = null, chalBest = 0, chalPrevN = 0, chalT0 = 0, chalNudged = false;
 
 function isWall(axis){                       // 'h' = the line y=0, 'v' = the line x=0
   const N = 41, R = axis==='h' ? XR : YR;
@@ -447,24 +448,26 @@ function updateChallenge(){
   let main, sub = '';
   if (n === want){
     main = want === 2 ? 'Both walls built.' : 'Wall built.';
-    sub  = 'Nothing crosses the line. Drag things around and watch it break.';
+    sub  = 'Now drag things around and watch it break.';
   } else if (onLine){
-    main = 'Make ' + (want===2?'both dashed lines':'the dashed line') + ' into solid walls.';
-    sub  = 'Keep everything off the lines \u2014 the fluid has to be on both sides.';
-  } else if (n < chalBest){
+    main = want===2 ? 'Make both dashed lines into walls.' : 'Make the dashed line into a wall.';
+    sub  = 'Keep them off the ' + (want === 2?'lines':'line') + ' \u2014 fluid needs both sides.';
+  } else if (S.els.length < chalPrevN && n < chalBest){
     main = 'You had one!';
     sub  = 'Don\u2019t undo \u2014 add.';
+  } else if (n === 0 && chalBest > 0){
+    main = 'Keep going.';
+    sub  = 'Think about symmetry.';
   } else if (n > 0){
     main = 'One wall built. Now the other.';
   } else {
-    main = 'Make ' + (want===2?'both dashed lines':'the dashed line') + ' into solid walls.';
-    sub  = 'Tap Source, then tap the plot to place one.';
+    main = want===2 ? 'Make both dashed lines into walls.' : 'Make the dashed line into a wall.';
+    sub  = 'Tap Source, then tap the plot.';
     if (chalNudged) sub = 'Think about symmetry.';
   }
-  chalBest = Math.max(chalBest, n);
+  chalBest = Math.max(chalBest, n); chalPrevN = S.els.length;
   $('taskmain').textContent = main;
   $('tasksub').textContent = sub;
-  $('tasksub').style.display = sub ? '' : 'none';
   $('task').classList.toggle('done', n === want);
 }
 
@@ -637,7 +640,7 @@ if (CH[q]){
   S.L.div = false;   // black is reserved for 'this line is now a wall'
   $('task').hidden = false; $('guides').hidden = false; $('cbar').hidden = false;
   if (!CHAL.gv) $('gv').style.display = 'none';
-  $('reset').onclick = () => { chalBest = 0; chalNudged = false; chalT0 = Date.now(); loadPreset(q); };
+  $('reset').onclick = () => { chalBest = 0; chalPrevN = 0; chalNudged = false; chalT0 = Date.now(); loadPreset(q); };
   chalT0 = Date.now();
   setInterval(() => { if (!chalNudged && Date.now()-chalT0 > 35000){ chalNudged = true; draw(); } }, 1000);
 }
