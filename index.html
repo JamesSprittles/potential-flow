@@ -527,7 +527,7 @@ function updateBody(){
   let main = BODY_TASK, sub = '';
   if (done){
     main = 'Closed body.';
-    sub  = 'The flow shuts around it \u2014 and it feels no drag at all.';
+    sub  = 'The flow closes around it \u2014 and it feels no drag at all.';
   } else if (!S.els.length){
     sub = chalNudged ? 'Try a Dipole.' : 'Tap one of the buttons, then tap the plot.';
   } else if (netQ() !== 0){
@@ -545,7 +545,7 @@ function updateBoth(){
   const floor = wallH, body = isBody();
   const onLine = S.els.some(e => Math.abs(e.y) <= 0.2);
   let sub;
-  if (floor && body) sub = 'A body in the stream, and the floor it sits above.';
+  if (floor && body) sub = 'A body in the stream, and a solid floor beneath it.';
   else if (onLine)   sub = 'Keep them off the floor \u2014 fluid needs both sides.';
   else if (body)     sub = 'Body \u2713 \u2014 now the floor.';
   else if (floor)    sub = 'Floor \u2713 \u2014 now give the stream something to flow round.';
