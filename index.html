@@ -72,7 +72,10 @@ summary{cursor:pointer;color:var(--muted)}
 .guides .gh.solid{border-top:5px solid var(--div)}
 .guides .gv.solid{border-left:5px solid var(--div)}
 .cbar{display:flex;gap:8px;align-items:center;margin-top:8px}
-.cbar .grow{flex:1}
+.cbar .grow{flex:1;color:var(--muted);font-size:13px}
+.cbar .next{visibility:hidden}
+.cbar .next.on{visibility:visible}
+body:not(.chained) .cbar .next{display:none}
 body.challenge .bar > select, body.challenge .bar > .sp,
 body.challenge .hdr, body.challenge details, body.challenge .ftr,
 body.challenge .legend, body.challenge .grid2, body.challenge .hint,
@@ -132,7 +135,7 @@ body.challenge #clear { display:none }
     <canvas id="fx" tabindex="0" role="img" aria-label="Flow plot"></canvas><div class="lay" id="lay"></div><div class="guides" id="guides" hidden><i class="gh" id="gh"></i><i class="gv" id="gv"></i></div>
   </div>
   <p class="hint" id="hint">Drag to move; Add, then click to place.</p>
-  <div class="cbar" id="cbar" hidden><span class="grow"></span><button id="reset">Start again</button></div>
+  <div class="cbar" id="cbar" hidden><span class="grow" id="stagelbl"></span><button id="next" class="next">Next</button><button id="reset">Start again</button></div>
 
   <div class="legend" role="group" aria-label="Layers to show">
     <label class="chk"><input type="checkbox" id="Lpsi" checked><span style="color:var(--stream)">■</span>Streamlines \(\psi\)</label>
@@ -205,7 +208,8 @@ const PRE = {
   bath:{U:0, els:[['src',0,0,-24],['vor',0,0,48]]},
   pair:{U:0, els:[['vor',0,0.6,32],['vor',0,-0.6,-32]]},
   wall:{U:0, els:[['src',0,0.8,16]]},
-  corner:{U:0, els:[['src',0.8,0.8,16]]}
+  corner:{U:0, els:[['src',0.8,0.8,16]]},
+  body:{U:1, els:[]}
 };
 function loadPreset(k){
   const p = PRE[k]; S.U = p.U; S.al = 0;
@@ -418,8 +422,14 @@ function draw(){
 // A line is a wall when the velocity normal to it vanishes along its whole length.
 // Test the physics directly rather than pattern-matching the arrangement, so any
 // construction that genuinely works is accepted.
-const CH = {wall:{gv:false}, corner:{gv:true}};
-let CHAL = null, chalBest = 0, chalPrevN = 0, chalT0 = 0, chalNudged = false;
+const CH = {
+  wall:   {kind:'walls', gv:false, guides:true },
+  corner: {kind:'walls', gv:true,  guides:true },
+  body:   {kind:'body',  gv:false, guides:false}
+};
+const SEQ = ['wall','corner','body'];
+let CHAL = null, CHKEY = null, STAGE = -1, CHAINED = false;
+let chalBest = 0, chalPrevN = 0, chalT0 = 0, chalNudged = false;
 
 function isWall(axis){                       // 'h' = the line y=0, 'v' = the line x=0
   const N = 41, R = axis==='h' ? XR : YR;
@@ -439,8 +449,17 @@ function isWall(axis){                       // 'h' = the line y=0, 'v' = the li
   return clear && used > N*0.6 && scale > 1e-6 && worst/scale < 0.02;
 }
 
+// A closed body exists when the dividing streamline closes: that needs a uniform
+// stream, net source strength zero, and something other than vorticity to block it.
+function netQ(){ let Q=0; for (const e of S.els) if (e.t==='src') Q+=e.n; return Q; }
+function hasBlocker(){ return S.els.some(e => e.t !== 'vor'); }
+function isBody(){
+  return S.els.length>0 && S.U>0.02 && netQ()===0 && hasBlocker() && stagPts.length>0;
+}
+
 function updateChallenge(){
   if (!CHAL) return;
+  if (CHAL.kind === 'body'){ updateBody(); return; }
   const h = isWall('h'), v = CHAL.gv ? isWall('v') : true;
   $('gh').classList.toggle('solid', h);
   if (CHAL.gv) $('gv').classList.toggle('solid', v);
@@ -467,9 +486,33 @@ function updateChallenge(){
     if (chalNudged) sub = 'Think about symmetry.';
   }
   chalBest = Math.max(chalBest, n); chalPrevN = S.els.length;
+  setTask(main, sub, n === want);
+}
+
+const BODY_TASK = 'Make a closed shape appear in the stream.';
+function updateBody(){
+  const done = isBody();
+  let main = BODY_TASK, sub = '';
+  if (done){
+    main = 'Closed body.';
+    sub  = 'The flow shuts around it \u2014 and it feels no drag at all.';
+  } else if (!S.els.length){
+    sub = chalNudged ? 'Try a Dipole.' : 'Tap one of the buttons, then tap the plot.';
+  } else if (netQ() !== 0){
+    sub = 'Not closed: what flows in has to flow back out.';
+  } else if (!hasBlocker()){
+    sub = 'A vortex on its own just swirls the stream.';
+  } else {
+    sub = 'Nothing is blocking the stream yet.';
+  }
+  setTask(main, sub, done);
+}
+
+function setTask(main, sub, done){
   $('taskmain').textContent = main;
   $('tasksub').textContent = sub;
-  $('task').classList.toggle('done', n === want);
+  $('task').classList.toggle('done', done);
+  if (CHAINED) $('next').classList.toggle('on', done && STAGE < SEQ.length-1);
 }
 
 // ---------- text readouts
@@ -635,17 +678,38 @@ function postHeight(){ try{ parent.postMessage({type:'ma3d1-height', id:location
 new ResizeObserver(postHeight).observe(document.body);
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change',draw);
 window.addEventListener('resize',resize);
-const q=new URLSearchParams(location.search).get('preset'); if (q && PRE[q]) $('preset').value=q;
-if (CH[q]){
-  CHAL = CH[q]; document.body.classList.add('challenge');
-  S.L.div = false;   // black is reserved for 'this line is now a wall'
-  $('task').hidden = false; $('guides').hidden = false; $('cbar').hidden = false;
-  if (!CHAL.gv) $('gv').style.display = 'none';
-  $('reset').onclick = () => { chalBest = 0; chalPrevN = 0; chalNudged = false; chalT0 = Date.now(); loadPreset(q); };
-  chalT0 = Date.now();
-  setInterval(() => { if (!chalNudged && Date.now()-chalT0 > 35000){ chalNudged = true; draw(); } }, 1000);
+const SP = new URLSearchParams(location.search);
+const q = SP.get('preset'); if (q && PRE[q]) $('preset').value = q;
+const playing = SP.has('play');
+
+function startStage(k){
+  CHKEY = k; CHAL = CH[k]; STAGE = SEQ.indexOf(k);
+  chalBest = 0; chalPrevN = 0; chalNudged = false; chalT0 = Date.now();
+  // black means 'the line that matters': a wall in stages 1-2, the dividing
+  // streamline in stage 3.
+  S.L.div = (CHAL.kind === 'body');
+  $('guides').hidden = !CHAL.guides;
+  $('gv').style.display = CHAL.gv ? '' : 'none';
+  $('gh').classList.remove('solid'); $('gv').classList.remove('solid');
+  $('next').classList.remove('on');
+  $('stagelbl').textContent = CHAINED ? 'Stage ' + (STAGE+1) + ' of ' + SEQ.length : '';
+  loadPreset(k);
 }
-loadPreset($('preset').value); resetParticles(); resize(); tick();
+
+if (playing || CH[q]){
+  CHAINED = playing;
+  document.body.classList.add('challenge');
+  if (CHAINED) document.body.classList.add('chained');
+  $('task').hidden = false; $('cbar').hidden = false;
+  const first = playing ? (CH[SP.get('play')] ? SP.get('play') : SEQ[0]) : q;
+  startStage(first);
+  $('reset').onclick = () => startStage(CHKEY);
+  $('next').onclick  = () => { if (STAGE < SEQ.length-1) startStage(SEQ[STAGE+1]); };
+  setInterval(() => { if (!chalNudged && Date.now()-chalT0 > 35000){ chalNudged = true; draw(); } }, 1000);
+} else {
+  loadPreset($('preset').value);
+}
+resetParticles(); resize(); tick();
 // KaTeX is deferred: render the static maths and build the canvas label once it is ready
 addEventListener('load',()=>{ if (window.renderMathInElement) renderMathInElement(document.body, katexOpts);
   makeLabels(); readout(); draw&&draw(); });
