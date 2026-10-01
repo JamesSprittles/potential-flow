@@ -203,7 +203,8 @@ const PRE = {
   pair:{U:0, els:[['vor',0,0.6,32],['vor',0,-0.6,-32]]},
   wall:{U:0, els:[['src',0,0.8,16]]},
   corner:{U:0, els:[['src',0.8,0.8,16]]},
-  body:{U:1, els:[]}
+  body:{U:1, els:[]},
+  wallbody:{U:1, els:[]}
 };
 function loadPreset(k){
   const p = PRE[k]; S.U = p.U; S.al = 0;
@@ -444,9 +445,10 @@ function draw(){
 const CH = {
   wall:   {kind:'walls', gv:false, guides:true,  snap:0.8, lattice:true },
   corner: {kind:'walls', gv:true,  guides:true,  snap:0.8, lattice:true },
-  body:   {kind:'body',  gv:false, guides:false, snap:0.4, lattice:false}
+  body:   {kind:'body',  gv:false, guides:false, snap:0.4, lattice:false},
+  wallbody:{kind:'both', gv:false, guides:true,  snap:0.8, lattice:true, strength:{src:8, dip:8}}
 };
-const SEQ = ['wall','corner','body'];
+const SEQ = ['wall','corner','body','wallbody'];
 let CHAL = null, CHKEY = null, STAGE = -1, CHAINED = false;
 let wallH = false, wallV = false;
 let chalBest = 0, chalPrevN = 0, chalT0 = 0, chalNudged = false;
@@ -465,7 +467,7 @@ function isWall(axis){                       // 'h' = the line y=0, 'v' = the li
     used++;
   }
   // nothing may sit on the line itself: a source in the wall is a different puzzle
-  const clear = S.els.every(e => Math.abs(axis==='h' ? e.y : e.x) > 0.2);
+  const clear = S.els.length > 0 && S.els.every(e => Math.abs(axis==='h' ? e.y : e.x) > 0.2);
   return clear && used > N*0.6 && scale > 1e-6 && worst/scale < 0.02;
 }
 
@@ -480,6 +482,7 @@ function isBody(){
 function updateChallenge(){
   if (!CHAL) return;
   if (CHAL.kind === 'body'){ updateBody(); return; }
+  if (CHAL.kind === 'both'){ updateBoth(); return; }
   const h = wallH, v = wallV;
   const n = (h?1:0) + (CHAL.gv ? (v?1:0) : 0), want = CHAL.gv ? 2 : 1;
   const onLine = S.els.some(e => Math.abs(e.y) <= 0.2 || (CHAL.gv && Math.abs(e.x) <= 0.2));
@@ -524,6 +527,23 @@ function updateBody(){
     sub = 'Nothing is blocking the stream yet.';
   }
   setTask(main, sub, done);
+}
+
+const BOTH_TASK = 'Build a body, and make the floor solid.';
+function updateBoth(){
+  const floor = wallH, body = isBody();
+  const onLine = S.els.some(e => Math.abs(e.y) <= 0.2);
+  let sub;
+  if (floor && body) sub = 'A body in the stream, and the floor it sits above.';
+  else if (onLine)   sub = 'Keep them off the floor \u2014 fluid needs both sides.';
+  else if (body)     sub = 'Body \u2713 \u2014 now the floor.';
+  else if (floor)    sub = 'Floor \u2713 \u2014 now give the stream something to flow round.';
+  else if (S.els.length && netQ() !== 0) sub = 'Not closed: what flows in has to flow back out.';
+  else if (S.els.length && !hasBlocker()) sub = 'A vortex on its own just swirls the stream.';
+  else if (S.els.length) sub = 'Neither yet.';
+  else sub = chalNudged ? 'A dipole makes a body. Then think about stage 1.'
+                        : 'Tap one of the buttons, then tap the plot.';
+  setTask(floor && body ? 'Body and floor.' : BOTH_TASK, sub, floor && body);
 }
 
 function setTask(main, sub, done){
@@ -632,7 +652,9 @@ function evPos(ev){ const r=fx.getBoundingClientRect(); return [ev.clientX-r.lef
 fx.addEventListener('pointerdown',ev=>{
   const [px,py]=evPos(ev); const h=hit(px,py);
   if (S.add){ const [x,y]=toW(px,py);
-    const t=S.add==='snk'?'src':S.add; const n= S.add==='snk'?-16: S.add==='src'?16: 32;
+    const t=S.add==='snk'?'src':S.add;
+    const SW=(CHAL && CHAL.strength) || {src:16, dip:32};
+    const n= S.add==='snk'?-SW.src : S.add==='src'?SW.src : S.add==='dip'?SW.dip : 32;
     S.els.push({t,x:snap(x),y:snap(y),n}); S.sel=S.els.length-1; setAdd(null); buildList(); draw(); return; }
   if (h>=0){ S.sel=h; drag=h; fx.setPointerCapture(ev.pointerId); fx.style.cursor='grabbing'; }
   else S.sel=-1;
@@ -706,7 +728,7 @@ function startStage(k){
   // black means 'the line that matters': a wall in stages 1-2, the dividing
   // streamline in stage 3.
   SNAP = CHAL.snap;
-  S.L.div = (CHAL.kind === 'body');
+  S.L.div = (CHAL.kind === 'body' || CHAL.kind === 'both');
   wallH = false; wallV = false;
   $('next').classList.remove('on');
   $('stagelbl').textContent = CHAINED ? 'Stage ' + (STAGE+1) + ' of ' + SEQ.length : '';
