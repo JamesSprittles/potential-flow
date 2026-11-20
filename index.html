@@ -192,7 +192,7 @@ const cb = bg.getContext('2d'), cf = fx.getContext('2d');
 const S = { U:1, al:0, els:[], sel:-1, add:null, dens:24,
   L:{psi:true, phi:false, div:true, cp:false, part:false} };
 let XR = 4;                 // x in [-XR,XR]; narrower on phones
-let W=0, H=0, dpr=1, YR=2.4, stagPts=[];
+let W=0, H=0, dpr=1, YR=2.4, stagPts=[], allStag=[];
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 
 // ---------- presets (strengths in multiples of π/16 so sliders hit π exactly)
@@ -329,8 +329,9 @@ function contour(V, nx, ny, st, mask, thr, off, d, levels, comp){
 
 // ---------- stagnation points: Newton from local minima of |w'| on a coarse grid
 function findStag(){
-  const pts=[]; const nx=81, ny=Math.max(21,Math.round(81*YR/XR)); const g=new Float64Array(nx*ny);
-  const xs=i=>-XR+2*XR*i/(nx-1), ys=j=>-YR+2*YR*j/(ny-1);
+  // searched over twice the view (ex), so a dividing line is still drawn when its stagnation point is just off the plot
+  const pts=[], ex=2; const nx=161, ny=Math.max(41,Math.round(161*YR/XR)); const g=new Float64Array(nx*ny);
+  const xs=i=>-XR*ex+2*XR*ex*i/(nx-1), ys=j=>-YR*ex+2*YR*ex*j/(ny-1);
   for (let j=0;j<ny;j++) for (let i=0;i<nx;i++){ const f=field(xs(i),ys(j)); g[j*nx+i]=f[2]*f[2]+f[3]*f[3]; }
   const ur=Uref();
   for (let j=1;j<ny-1;j++) for (let i=1;i<nx-1;i++){
@@ -345,12 +346,49 @@ function findStag(){
     }
     const r=dw(x,y); if (!r) continue;
     if (!(Math.hypot(r[0],r[1])<1e-6*Math.max(1,ur))) continue;
-    if (Math.abs(x)>XR*1.02 || Math.abs(y)>YR*1.02) continue;
+    if (Math.abs(x)>XR*ex || Math.abs(y)>YR*ex) continue;
     if (S.els.some(e=>Math.hypot(x-e.x,y-e.y)<1e-3)) continue;
     if (pts.some(p=>Math.hypot(p[0]-x,p[1]-y)<1e-4)) continue;
     pts.push([x,y]);
   }
   return pts;
+}
+
+// ---------- dividing streamlines, traced rather than contoured.
+// psi jumps by Q across a source's branch cut, so a contour at the stagnation value of psi breaks
+// wherever it crosses another source's cut. Instead: on a small circle round each stagnation point,
+// find where psi - psi_s changes sign (psi differences from Im of the integral of w' dz, which never
+// sees a cut), then follow the velocity field out along each branch until it leaves the plot,
+// reaches a singularity or reaches another stagnation point.
+function dpsi(x0,y0,x1,y1){                       // Im ∫ w' dz along the segment (Simpson)
+  const dx=x1-x0, dy=y1-y0, n=8; let s=0;
+  for (let k=0;k<=n;k++){ const t=k/n, wt=(k===0||k===n)?1:(k%2?4:2); const f=field(x0+t*dx,y0+t*dy); s+=wt*(f[2]*dy+f[3]*dx); }
+  return s/(3*n);
+}
+function separatrices(){
+  const lines=[], eps=0.03*XR/4, M=240, h=1.5*2*XR/Math.max(W,300), maxSteps=Math.ceil(8*(XR+YR)/h);
+  const nearSing=(x,y)=>S.els.some(e=>Math.hypot(x-e.x,y-e.y)<0.04);
+  const unit=(x,y,sg)=>{ const f=field(x,y), u=f[2], v=-f[3], m=Math.hypot(u,v); return m>1e-12&&isFinite(m)?[sg*u/m,sg*v/m]:null; };
+  for (const [sx,sy] of allStag){
+    const D=new Float64Array(M);
+    for (let k=0;k<M;k++){ const t=TAU*k/M; D[k]=dpsi(sx,sy,sx+eps*Math.cos(t),sy+eps*Math.sin(t)); }
+    for (let k=0;k<M;k++){ const a=D[k], b=D[(k+1)%M]; if ((a>0)===(b>0)) continue;
+      const t=TAU*(k+a/(a-b))/M, px=sx+eps*Math.cos(t), py=sy+eps*Math.sin(t);
+      const f=field(px,py), sg=(f[2]*Math.cos(t)-f[3]*Math.sin(t))>=0?1:-1;   // outflowing or inflowing branch
+      const pts=[[sx,sy],[px,py]]; let x=px, y=py;
+      for (let n=0;n<maxSteps;n++){
+        const k1=unit(x,y,sg); if(!k1) break; const k2=unit(x+0.5*h*k1[0],y+0.5*h*k1[1],sg); if(!k2) break;
+        const k3=unit(x+0.5*h*k2[0],y+0.5*h*k2[1],sg); if(!k3) break; const k4=unit(x+h*k3[0],y+h*k3[1],sg); if(!k4) break;
+        x+=h*(k1[0]+2*k2[0]+2*k3[0]+k4[0])/6; y+=h*(k1[1]+2*k2[1]+2*k3[1]+k4[1])/6;
+        if (!isFinite(x+y)) break; pts.push([x,y]);
+        if ((Math.abs(x)>XR*1.05+0.1 && Math.abs(x)>Math.abs(sx)+0.1) || (Math.abs(y)>YR*1.05+0.1 && Math.abs(y)>Math.abs(sy)+0.1)) break;
+        if (Math.abs(x)>XR*2.05 || Math.abs(y)>YR*2.05 || nearSing(x,y)) break;
+        if (n>3 && allStag.some(([qx,qy])=>Math.hypot(x-qx,y-qy)<1.5*h)) break;
+      }
+      lines.push(pts);
+    }
+  }
+  return lines;
 }
 
 // ---------- drawing
@@ -397,10 +435,11 @@ function draw(){
   if (S.L.psi){ cb.strokeStyle=css('--stream'); cb.lineWidth=1.1; cb.globalAlpha=.9;
     cb.stroke(contour(PS,nx,ny,st,mask,0.5*qmin,d/2,d,null,1)); }
   cb.globalAlpha=1;
-  stagPts=findStag();
-  if (S.L.div && stagPts.length){
-    const lv=[]; for (const [x,y] of stagPts){ const v=field(x,y)[1]; if (!lv.some(u=>Math.abs(u-v)<1e-9)) lv.push(v+1e-9); }
-    cb.strokeStyle=css('--div'); cb.lineWidth=2.2; cb.stroke(contour(PS,nx,ny,st,mask,0.5*qmin,0,1,lv,1));
+  allStag=findStag(); stagPts=allStag.filter(([x,y])=>Math.abs(x)<=XR*1.02 && Math.abs(y)<=YR*1.02);
+  if (S.L.div && allStag.length){
+    cb.strokeStyle=css('--div'); cb.lineWidth=2.2; cb.beginPath();
+    for (const L of separatrices()) L.forEach(([x,y],k)=>{ const [px,py]=toPx(x,y); k?cb.lineTo(px,py):cb.moveTo(px,py); });
+    cb.stroke();
     for (const [x,y] of stagPts){ const [px,py]=toPx(x,y); cb.beginPath(); cb.arc(px,py,4.5,0,TAU); cb.fillStyle=css('--div'); cb.fill(); cb.lineWidth=1.5; cb.strokeStyle=css('--bg'); cb.stroke(); }
   }
   // challenge guides: drawn here rather than as DOM overlays, so they render
