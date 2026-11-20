@@ -133,7 +133,7 @@ summary{cursor:pointer;color:var(--muted)}
 
   <details>
     <summary>How to type \(w(z)\)</summary>
-    <p class="muted">Use <code>z</code>, <code>i</code>, <code>pi</code> (or π), <code>e</code>, numbers, <code>+ - * /</code> and <code>^</code> (or <code>**</code>). Multiplication can be implicit: <code>2 pi i</code>, <code>U(z + a^2/z)</code>. Functions: <code>log</code> (or <code>ln</code>), <code>exp</code>, <code>sqrt</code>, <code>sin</code>, <code>cos</code>, <code>tan</code>, <code>sinh</code>, <code>cosh</code>, <code>tanh</code>. Any other letter needs a value under Constants, e.g. <code>U = 1, a = 1, G = -2 pi</code>; a constant may use those before it. Press <kbd>Enter</kbd> or Plot.</p>
+    <p class="muted">Use <code>z</code>, <code>i</code>, <code>pi</code> (or π), <code>e</code>, numbers, <code>+ - * /</code> and <code>^</code> (or <code>**</code>). Multiplication can be implicit, with or without spaces: <code>2 pi i</code>, <code>ilog(z)</code>, <code>U(z + a^2/z)</code>. Functions: <code>log</code> (or <code>ln</code>), <code>exp</code>, <code>sqrt</code>, <code>sin</code>, <code>cos</code>, <code>tan</code>, <code>sinh</code>, <code>cosh</code>, <code>tanh</code>. Any other letter needs a value under Constants, e.g. <code>U = 1, a = 1, G = -2 pi</code>; a constant may use those before it. Press <kbd>Enter</kbd> or Plot.</p>
     <p class="muted">Examples: <code>z + m/(2 pi) log(z)</code> with <code>m = 3</code>; <code>U(z + a^2/z) - i G/(2 pi) log(z)</code>; <code>z^2</code> for flow into a corner.</p>
   </details>
   <details>
@@ -224,20 +224,31 @@ J.pow=(a,b)=>{
 // multiplication (2z, 2 pi i, (z+1)(z-1)), i, pi or π, e, and the functions in FN.
 // ======================================================================================
 const NUMRE=/^(\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?/;
-function tokenize(s){
+// "ilog" means i·log, "2ipi" 2·i·π: a name that is not known is split into known ones if it can be
+// (fewest pieces wins), so implicit multiplication works without spaces.
+function splitId(w,names){
+  const known=v=> v in FN || v==='z' || v==='i' || v==='pi' || v==='e' || names.has(v);
+  if (known(w)) return [w];
+  const best=new Array(w.length+1).fill(null); best[0]=[];
+  for (let a=0;a<w.length;a++){ if (!best[a]) continue;
+    for (let b=w.length;b>a;b--){ const p=w.slice(a,b);
+      if (known(p) && (!best[b] || best[b].length>best[a].length+1)) best[b]=best[a].concat([p]); } }
+  return best[w.length] || [w];
+}
+function tokenize(s,names){
   s=s.replace(/\*\*/g,'^').replace(/[−–]/g,'-').replace(/·|×/g,'*').replace(/Γ/g,'Gamma').replace(/π/g,'pi');
   const T=[]; let i=0;
   while(i<s.length){ const ch=s[i];
     if (/\s/.test(ch)){ i++; continue; }
     const m=s.slice(i).match(NUMRE); if (m && !/[eE]/.test(ch)){ T.push({t:'num',v:parseFloat(m[0])}); i+=m[0].length; continue; }
-    const id=s.slice(i).match(/^[A-Za-z_][A-Za-z_0-9]*/); if (id){ T.push({t:'id',v:id[0]}); i+=id[0].length; continue; }
+    const id=s.slice(i).match(/^[A-Za-z_][A-Za-z_0-9]*/); if (id){ for (const v of splitId(id[0],names)) T.push({t:'id',v}); i+=id[0].length; continue; }
     if ('+-*/^(),='.includes(ch)){ T.push({t:ch}); i++; continue; }
     throw new Error('I don’t understand “'+ch+'”.');
   }
   return T;
 }
-function parse(src){
-  const T=tokenize(src); let p=0;
+function parse(src,names=new Set()){
+  const T=tokenize(src,names); let p=0;
   const peek=()=>T[p], eat=t=>{ if (!T[p]||T[p].t!==t) throw new Error(t===')'?'A bracket is not closed.':'Expected “'+t+'”.'); return T[p++]; };
   const startsPrimary=k=>k&&(k.t==='num'||k.t==='id'||k.t==='(');
   function expr(){ let a=term(); while(peek()&&(peek().t==='+'||peek().t==='-')){ const o=T[p++].t; a={op:o,a,b:term()}; } return a; }
@@ -284,7 +295,7 @@ function parseConsts(src){
   const K={}; const parts=src.split(/[;,\n]/).map(s=>s.trim()).filter(Boolean);
   for (const pt of parts){ const m=pt.match(/^([A-Za-z_][A-Za-z_0-9]*|Γ)\s*=\s*(.+)$/); if (!m) throw new Error('Constants should look like “a = 1, G = 2 pi”.');
     const name=m[1]==='Γ'?'Gamma':m[1]; if (name==='z'||name==='i') throw new Error('“'+name+'” is reserved.');
-    const f=compile(parse(m[2]),K); const v=f(J.c([0,0]))[0]; if (!isFinite(v[0]+v[1])) throw new Error('“'+name+'” is not finite.'); K[name]=v; }
+    const f=compile(parse(m[2],new Set(Object.keys(K))),K); const v=f(J.c([0,0]))[0]; if (!isFinite(v[0]+v[1])) throw new Error('“'+name+'” is not finite.'); K[name]=v; }
   return K;
 }
 // LaTeX for the typed formula, so the readout shows what was understood.
@@ -406,6 +417,7 @@ function findStag(){
   const pts=[]; const ex=2, nx=161, ny=Math.max(41,Math.round(161*YR/XR)); const g=new Float64Array(nx*ny);
   const xs=i=>-XR*ex+2*XR*ex*i/(nx-1), ys=j=>-YR*ex+2*YR*ex*j/(ny-1);
   for (let j=0;j<ny;j++) for (let i=0;i<nx;i++){ const f=field(xs(i),ys(j)); const s=f[2]*f[2]+f[3]*f[3]; g[j*nx+i]=isFinite(s)?s:1e300; }
+  if (!(g.reduce((m,v)=>Math.max(m,v),0)>1e-24)) return [];      // w constant: no flow, so no stagnation points to speak of
   const ur=Uref();
   for (let j=1;j<ny-1;j++) for (let i=1;i<nx-1;i++){
     const v=g[j*nx+i]; let min=true;
@@ -587,7 +599,7 @@ function readout(){
 function plot(){
   const msg=$('err');
   try{
-    const K=parseConsts($('consts').value); const ast=parse($('wIn').value); const f=compile(ast,K);
+    const K=parseConsts($('consts').value); const ast=parse($('wIn').value,new Set(Object.keys(K))); const f=compile(ast,K);
     const t=f([[0.37,0.21],ONE,ZERO]); if (!t) throw new Error('Could not evaluate.');
     WF=f; AST=ast; msg.textContent=''; $('wIn').removeAttribute('aria-invalid');
   } catch(err){ msg.textContent=err.message; $('wIn').setAttribute('aria-invalid','true'); return; }
@@ -637,7 +649,7 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change',draw);
 window.addEventListener('resize',resize);
 const SPRM=new URLSearchParams(location.search); if (SPRM.get('w')){ $('wIn').value=SPRM.get('w'); $('consts').value=SPRM.get('c')||''; }
 window.__pfc={ get stag(){return allStag;}, get sing(){return SING;}, get U(){return Uinf;}, sep:()=>separatrices(), plot };
-try{ const K=parseConsts($('consts').value); AST=parse($('wIn').value); WF=compile(AST,K); }catch(err){ $('err').textContent=err.message; }
+try{ const K=parseConsts($('consts').value); AST=parse($('wIn').value,new Set(Object.keys(K))); WF=compile(AST,K); }catch(err){ $('err').textContent=err.message; }
 resetParticles(); resize(); tick();
 // KaTeX is deferred: render the static maths and build the canvas label once it is ready
 addEventListener('load',()=>{ if (window.renderMathInElement) renderMathInElement(document.body, katexOpts);
